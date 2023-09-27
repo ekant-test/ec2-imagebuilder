@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for creating an Image Recipe
+
+Resources:
+  ImageRecipe:
+    Type: "AWS::ImageBuilder::ImageRecipe"
+    Properties:
+      Name: patch-image-recipe
+      Description: Image Recipe for patching AMI
+      Version: 1.0.0
+      ParentImage: "ami-*******" # Change AMI ID ##
+      Components:
+        - ComponentArn: "arn:aws:imagebuilder:ap-southeast-2:aws:component/update-linux/x.x.x"
+        - ComponentArn: "arn:aws:imagebuilder:ap-southeast-2:aws:component/inspector-test-linux/x.x.x"
+
+  MyInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Roles:
+        - !Ref MyIAMRole
+
+  MyIAMRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: my-iam-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        - "arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder"
+        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        - "arn:aws:iam::aws:policy/AmazonInspector2FullAccess"
+        - "arn:aws:iam::aws:policy/AmazonInspectorFullAccess"
+        - "arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilderECRContainerBuilds"
+      Policies:
+        - PolicyName: my-iam-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateImage
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                  - ec2:CreateTags
+                  - ssm:SendCommand
+                  - inspector:CreateResourceGroup
+                  - inspector:CreateAssessmentTarget
+                Resource: "*"
+
+  InfrastructureConfiguration:
+    Type: "AWS::ImageBuilder::InfrastructureConfiguration"
+    Properties:
+      Name: my-infrastructure-config
+      Description: Infrastructure Configuration for AMI
+      InstanceProfileName: !Ref MyInstanceProfile
+      SecurityGroupIds:
+        - "sg-*********" # Change Security Group ##
+      SubnetId: "subnet-********" # Change subnet ##
+      Logging:
+        S3Logs:
+          S3BucketName: "aws-s3-bucket" # Change S3 bucket ##
+
+  ImagePipeline:
+    Type: "AWS::ImageBuilder::ImagePipeline"
+    Properties:
+      Name: my-image-pipeline
+      Description: Image Pipeline for creating AMI
+      DistributionConfigurationArn: !GetAtt DistributionConfigurationAllParameters.Arn
+      Schedule:
+        ScheduleExpression: 'cron(0 0 1 * ? *)'
+        PipelineExecutionStartCondition: 'EXPRESSION_MATCH_ONLY'
+      ImageRecipeArn: !GetAtt ImageRecipe.Arn
+      InfrastructureConfigurationArn: !GetAtt InfrastructureConfiguration.Arn
+      Status: ENABLED
+
+  DistributionConfigurationAllParameters:
+    Type: 'AWS::ImageBuilder::DistributionConfiguration'
+    Properties:
+      Name: 'ami-distribution'
+      Description: 'ami-distribution'
+      Distributions:
+        - Region: 'ap-southeast-2'
+          AmiDistributionConfiguration:
+            Name: 'ami-dist-test {{ imagebuilder:buildDate }}'
+            Description: 'Distribute a copy of the AMI to specified target accounts.'
+            TargetAccountIds:
+              - '111111111111'
+              - '111111111122'
+
+Outputs:
+  ImageRecipeArn:
+    Value: !GetAtt ImageRecipe.Arn
+    Description: ARN of the created Image Recipe
+
+  ImagePipelineArn:
+    Value: !GetAtt ImagePipeline.Arn
+    Description: ARN of the created Image Pipeline
